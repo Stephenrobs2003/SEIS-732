@@ -1,0 +1,228 @@
+-- =====================================================================
+-- P0 feasibility profiling: Minnesota Wildlife Survey Gap Finder
+-- Source: bigquery-public-data.gbif.occurrences
+--
+-- COST RULES (read before running anything)
+--   * The GBIF table is several TB. BigQuery bills by bytes in the
+--     columns read (including columns used only in WHERE). Long text
+--     columns (occurrenceid, license, stateprovince, eventdate, etc.)
+--     are expensive when read across billions of rows.
+--   * The free tier allows 1 TB scanned per month. A first version of
+--     Step 2 that read ~25 columns was refused with "Quota exceeded:
+--     free query bytes scanned" — that is recorded as P0 evidence.
+--   * Run ONE statement at a time (highlight it, then Run) and check the
+--     validator's "This query will process X" BEFORE running Step 2.
+--     It must be well under the free bytes you have left this month.
+--   * Step 1 is metadata only. Step 2 is the only large scan. Everything
+--     after Step 2 reads small tables in MY project.
+--   * All outputs are aggregates. Do not export or commit row-level data.
+--
+-- Replace fiery-monitor-508317-a8 with your GCP project ID (Ctrl+H, replace all).
+-- =====================================================================
+
+
+-- ---------------------------------------------------------------------
+-- 1. Authorized objects and definitions (metadata only, ~0 bytes)
+-- ---------------------------------------------------------------------
+
+-- 1a. Objects in the dataset
+SELECT table_name, table_type, creation_time
+FROM `bigquery-public-data.gbif.INFORMATION_SCHEMA.TABLES`
+ORDER BY table_name;
+
+-- 1b. Columns, types, nullability, partitioning and clustering
+--     If countrycode or decimallatitude appears as a clustering column,
+--     the WHERE filter in Step 2 will prune data and bill even less.
+SELECT column_name, data_type, is_nullable,
+       is_partitioning_column, clustering_ordinal_position
+FROM `bigquery-public-data.gbif.INFORMATION_SCHEMA.COLUMNS`
+WHERE table_name = 'occurrences'
+ORDER BY ordinal_position;
+
+-- 1c. Total rows, size, and last modification (metadata; no scan)
+SELECT table_id,
+       row_count,
+       ROUND(size_bytes / POW(1024, 4), 2) AS size_tb,
+       TIMESTAMP_MILLIS(last_modified_time) AS last_modified
+FROM `bigquery-public-data.gbif.__TABLES__`
+WHERE table_id = 'occurrences';
+
+-- 1d. Dataset location/region
+--     Region-level INFORMATION_SCHEMA.SCHEMATA is NOT queryable here: it
+--     requires bigquery.datasets.get on the whole bigquery-public-data
+--     project ("Access Denied"). Record the location from metadata instead:
+--       * Console: Explorer > bigquery-public-data > gbif > Details > "Data location"
+--       * or Cloud Shell:  bq show --format=prettyjson bigquery-public-data:gbif | grep location
+
+
+-- ---------------------------------------------------------------------
+-- 2. Build the bounded working subset (the ONLY large scan)
+--
+--    Cost design:
+--      * Reads only numeric columns plus short codes. No long text.
+--      * Filters on countrycode (2 chars) and a numeric lat/long box
+--        around Minnesota instead of the long stateprovince string.
+--      * The box also catches edges of WI, IA, ND, SD; Step 2c clips
+--        to the true Minnesota boundary using a small public table.
+--    If the validator estimate is still too high, run Step 2-ALT instead.
+-- ---------------------------------------------------------------------
+
+-- 2a. Create a dataset in my project for working tables
+CREATE SCHEMA IF NOT EXISTS `fiery-monitor-508317-a8.p0_scratch`
+OPTIONS (location = 'US');
+
+-- 2b. One narrow scan of the source -> bounding-box subset
+CREATE OR REPLACE TABLE `fiery-monitor-508317-a8.p0_scratch.mn_box_occurrences` AS
+SELECT
+  gbifid,
+  datasetkey,
+  basisofrecord,
+  kingdom,
+  class,
+  specieskey,
+  decimallatitude,
+  decimallongitude,
+  coordinateuncertaintyinmeters,
+  year,
+  month
+FROM `bigquery-public-data.gbif.occurrences`
+WHERE countrycode = 'US'
+  AND decimallatitude  BETWEEN 43.4 AND 49.5
+  AND decimallongitude BETWEEN -97.3 AND -89.4;
+
+-- 2-ALT. Use ONLY if 2b's estimate exceeds your remaining free bytes:
+--        same query on a ~10% block sample (bills ~10% of 2b). Good
+--        enough for P0 rates and coverage; record that counts are
+--        sampled. Resolve a full extract with the instructor before P1.
+-- CREATE OR REPLACE TABLE `fiery-monitor-508317-a8.p0_scratch.mn_box_occurrences` AS
+-- SELECT gbifid, datasetkey, basisofrecord, kingdom, class, specieskey,
+--        decimallatitude, decimallongitude, coordinateuncertaintyinmeters,
+--        year, month
+-- FROM `bigquery-public-data.gbif.occurrences` TABLESAMPLE SYSTEM (10 PERCENT)
+-- WHERE countrycode = 'US'
+--   AND decimallatitude  BETWEEN 43.4 AND 49.5
+--   AND decimallongitude BETWEEN -97.3 AND -89.4;
+
+-- 2c. Clip to the true Minnesota boundary (small tables; cheap)
+CREATE OR REPLACE TABLE `fiery-monitor-508317-a8.p0_scratch.mn_occurrences` AS
+SELECT o.*
+FROM `fiery-monitor-508317-a8.p0_scratch.mn_box_occurrences` AS o
+JOIN `bigquery-public-data.geo_us_boundaries.states` AS s
+  ON s.state_name = 'Minnesota'
+ AND ST_CONTAINS(s.state_geom, ST_GEOGPOINT(o.decimallongitude, o.decimallatitude));
+
+-- 2d. How much did the box add beyond Minnesota? (records cut by clipping)
+SELECT
+  (SELECT COUNT(*) FROM `fiery-monitor-508317-a8.p0_scratch.mn_box_occurrences`) AS box_rows,
+  (SELECT COUNT(*) FROM `fiery-monitor-508317-a8.p0_scratch.mn_occurrences`)     AS mn_rows;
+
+
+-- ---------------------------------------------------------------------
+-- 3. Scale, time coverage, and candidate key (subset)
+-- ---------------------------------------------------------------------
+SELECT
+  COUNT(*)                AS row_count,
+  COUNT(DISTINCT gbifid)  AS distinct_gbifid,
+  COUNTIF(gbifid IS NULL) AS null_gbifid,
+  MIN(year)               AS earliest_year,
+  MAX(year)               AS latest_year,
+  COUNTIF(year IS NULL)   AS null_year
+FROM `fiery-monitor-508317-a8.p0_scratch.mn_occurrences`;
+
+
+-- ---------------------------------------------------------------------
+-- 4. Records per year (coverage, growth, recency)
+-- ---------------------------------------------------------------------
+SELECT
+  year,
+  COUNT(*)                   AS records,
+  COUNT(DISTINCT specieskey) AS distinct_species,
+  COUNT(DISTINCT datasetkey) AS contributing_datasets
+FROM `fiery-monitor-508317-a8.p0_scratch.mn_occurrences`
+WHERE year >= 1990
+GROUP BY year
+ORDER BY year;
+
+
+-- ---------------------------------------------------------------------
+-- 5. Null / quality rates on fields the questions depend on
+--    (records without coordinates are excluded by the Step 2 box filter;
+--     their share is not measured here — a P1 item.)
+-- ---------------------------------------------------------------------
+SELECT
+  COUNT(*) AS row_count,
+  ROUND(100 * COUNTIF(coordinateuncertaintyinmeters IS NULL) / COUNT(*), 2)  AS pct_null_uncertainty,
+  ROUND(100 * COUNTIF(coordinateuncertaintyinmeters > 10000) / COUNT(*), 2)  AS pct_uncertainty_over_10km,
+  ROUND(100 * COUNTIF(specieskey IS NULL) / COUNT(*), 2) AS pct_not_resolved_to_species,
+  ROUND(100 * COUNTIF(class IS NULL) / COUNT(*), 2)      AS pct_null_class,
+  ROUND(100 * COUNTIF(month IS NULL) / COUNT(*), 2)      AS pct_null_month
+FROM `fiery-monitor-508317-a8.p0_scratch.mn_occurrences`;
+
+
+-- ---------------------------------------------------------------------
+-- 6. What kind of records are these? (basis of record, contributor
+--    concentration)
+-- ---------------------------------------------------------------------
+SELECT basisofrecord, COUNT(*) AS records,
+       ROUND(100 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct_of_records
+FROM `fiery-monitor-508317-a8.p0_scratch.mn_occurrences`
+GROUP BY basisofrecord
+ORDER BY records DESC;
+
+-- Share of records from the top 5 contributing datasets
+SELECT datasetkey, COUNT(*) AS records,
+       ROUND(100 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct_of_records
+FROM `fiery-monitor-508317-a8.p0_scratch.mn_occurrences`
+GROUP BY datasetkey
+ORDER BY records DESC
+LIMIT 5;
+-- Look up the top datasetkeys at https://www.gbif.org/dataset/<datasetkey>
+-- to name them (e.g., eBird, iNaturalist) and read each one's license.
+
+
+-- ---------------------------------------------------------------------
+-- 7. Taxonomic coverage for animal classes in scope
+-- ---------------------------------------------------------------------
+SELECT class,
+       COUNT(*) AS records,
+       COUNT(DISTINCT specieskey) AS distinct_species,
+       MIN(year) AS first_year,
+       MAX(year) AS last_year
+FROM `fiery-monitor-508317-a8.p0_scratch.mn_occurrences`
+WHERE kingdom = 'Animalia'
+GROUP BY class
+ORDER BY records DESC
+LIMIT 15;
+
+
+-- ---------------------------------------------------------------------
+-- 8. Spatial grain check: can we fill a statewide grid?
+--    0.25-degree cells (~28 km N–S) for recent years.
+-- ---------------------------------------------------------------------
+SELECT
+  COUNT(*) AS occupied_cells,
+  APPROX_QUANTILES(records, 4) AS records_per_cell_quartiles,
+  COUNTIF(records < 10) AS cells_under_10_records
+FROM (
+  SELECT
+    FLOOR(decimallatitude  / 0.25) AS lat_cell,
+    FLOOR(decimallongitude / 0.25) AS lon_cell,
+    COUNT(*) AS records
+  FROM `fiery-monitor-508317-a8.p0_scratch.mn_occurrences`
+  WHERE kingdom = 'Animalia'
+    AND year >= 2015
+    AND (coordinateuncertaintyinmeters IS NULL OR coordinateuncertaintyinmeters <= 10000)
+  GROUP BY lat_cell, lon_cell
+);
+
+
+-- ---------------------------------------------------------------------
+-- 9. Seasonality check: records by month for amphibians, reptiles, birds
+-- ---------------------------------------------------------------------
+SELECT class, month, COUNT(*) AS records
+FROM `fiery-monitor-508317-a8.p0_scratch.mn_occurrences`
+WHERE class IN ('Amphibia', 'Squamata', 'Testudines', 'Aves')
+  AND year >= 2015
+  AND month IS NOT NULL
+GROUP BY class, month
+ORDER BY class, month;
