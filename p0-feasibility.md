@@ -1,7 +1,3 @@
-# P0 Feasibility — Minnesota Wildlife Survey Gap Finder
-
-> Values marked **[Q#]** come from the numbered query in `sql/00_feasibility.sql`; the results are summarized in `evidence/p0-feasibility-results.md`.
-
 ## 1. Working title
 
 **Minnesota Wildlife Survey Gap Finder** — where and when Minnesota's animal life is under-recorded.
