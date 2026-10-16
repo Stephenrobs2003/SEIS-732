@@ -2,7 +2,9 @@
 
 An individual data-product project (P0–P4) built in BigQuery on the GBIF species occurrence public dataset.
 
-**Current purpose (P0):** test whether GBIF occurrence records can support a data product that helps Minnesota nongame wildlife survey coordinators decide **where and when to send limited field-survey effort**, by showing which parts of the state and which taxa are under-recorded, how recording has changed over time, and when in the year each group is typically observed.
+**Current purpose (P0):** test whether GBIF occurrence records can support a data product that helps Minnesota nongame wildlife survey coordinators decide **where and when to send limited field-survey effort**, by showing recording density: which parts of the state and which taxa have few occurrence records (possible survey gaps), how recording has changed over time, and when in the year each group is typically recorded.
+
+**Scope of claims:** the product reports recording density and flags possible survey gaps. Occurrence counts reflect where and when people recorded wildlife; they do not measure wildlife abundance and do not by themselves establish where surveys are needed.
 
 ## P0 files
 
