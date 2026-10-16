@@ -1,6 +1,12 @@
+# P0 Feasibility — Minnesota Wildlife Survey Gap Finder
+
+> Values marked **[Q#]** come from the numbered query in `sql/00_feasibility.sql`; the results are summarized in `evidence/p0-feasibility-results.md`.
+
 ## 1. Working title
 
-**Minnesota Wildlife Survey Gap Finder** — where and when Minnesota's animal life is under-recorded.
+**Minnesota Wildlife Survey Gap Finder** — where and when Minnesota's animal life has been recorded least.
+
+**Scope of claims.** The product reports **recording density** (how many occurrence records exist for a place, time, and taxon) and flags **possible survey gaps** (cells with few or no records). Occurrence counts reflect where people looked and reported, so they cannot establish wildlife abundance, population change, or that a survey is needed. Whether a flagged gap warrants fieldwork remains the coordinator's judgment, informed by habitat and program priorities.
 
 ## 2. Audience and need
 
@@ -8,9 +14,9 @@
 
 **Decision / recurring task.** Each spring, the coordinator decides which parts of the state to send survey crews and volunteers to, which taxonomic groups to prioritize, and in which months to schedule visits. Field days are the scarce resource.
 
-**Why a data product helps.** Today the evidence about *where records already exist* is scattered across museum collections, agency surveys, and citizen-science apps (iNaturalist, eBird). GBIF aggregates these into one occurrence table. A product that summarizes recording density over space, time, and taxa makes survey gaps visible in minutes instead of being assembled by hand.
+**Why a data product helps.** Today the evidence about *where records already exist* is scattered across museum collections, agency surveys, and citizen-science apps (iNaturalist, eBird). GBIF aggregates these into one occurrence table. A product that summarizes recording density over space, time, and taxa makes possible survey gaps — places, taxa, and times with few records — visible in minutes instead of being assembled by hand.
 
-**What changes if it works.** The coordinator shifts crew-days from well-recorded areas (metro, popular parks) toward under-recorded grid cells, targets taxa whose records have thinned recently, and schedules visits in the months each group is most detectable.
+**What changes if it works.** The coordinator has a shortlist of low-recording cells and taxa to weigh against habitat knowledge and program priorities when assigning crew-days, rather than defaulting to well-recorded areas (metro, popular parks), and schedules visits in the months each group is most often recorded.
 
 ## 3. Proposed analytical product and questions
 
@@ -18,9 +24,9 @@
 
 **Questions**
 
-1. **Q-A Gaps:** For a chosen taxonomic class and period (e.g., amphibians, 2015–present), which 0.25° grid cells in Minnesota have few or no records?
+1. **Q-A Possible gaps:** For a chosen taxonomic class and period (e.g., amphibians, 2015–present), which 0.25° grid cells in Minnesota have few or no records?
 2. **Q-B Trend:** How have the number of records and the number of distinct species recorded per year changed since 2000 for each target class, and how much of that change comes from citizen-science sources versus specimens and formal surveys?
-3. **Q-C Lapsed areas:** Which grid cells had records of a target class before 2010 but few or none since 2015 (possible decline *or* lapsed survey effort)?
+3. **Q-C Lapsed areas:** Which grid cells had records of a target class before 2010 but few or none since 2015 (a possible lapse in recording; the data cannot distinguish reduced survey effort from a real change in the animals)?
 4. **Q-D Timing:** In which months is each target class most often recorded, to guide when surveys are scheduled?
 
 ## 4. Source identification and access
@@ -53,7 +59,7 @@
 
 | Proposed question | Needed fields or concepts | Candidate source object(s) | Why the source appears sufficient | Gap or assumption to test in P1 |
 |---|---|---|---|---|
-| Q-A Gaps | lat/long, coordinate precision, class, year | `occurrences` → MN subset | Point coordinates allow any grid; 463 occupied 0.25° cells since 2015, only 15 with < 10 records **[Q8]** | Cell size per class; 94% of records lack an uncertainty value, so precision cannot be filtered reliably; "few records" threshold |
+| Q-A Possible gaps | lat/long, coordinate precision, class, year | `occurrences` → MN subset | Point coordinates allow any grid; 463 occupied 0.25° cells since 2015, only 15 with < 10 records **[Q8]** | Cell size per class; 94% of records lack an uncertainty value, so precision cannot be filtered reliably; "few records" threshold |
 | Q-B Trend | year, specieskey, class, basisofrecord, datasetkey | same | Year field covers decades with 0.12% null **[Q3, Q4]**; basisofrecord separates human observation (95%) from specimens (2.5%) **[Q6]** | Citizen-science growth swamps the trend (eBird 88%); normalize by contributing datasets or source type |
 | Q-C Lapsed areas | grid cell, class, year (two periods) | same | Same fields as Q-A, compared across periods | Enough pre-2010 records per cell to call an area "lapsed" rather than never-recorded, especially for amphibians (18,458 records) and reptiles (961) **[Q7]** |
 | Q-D Timing | month, class | same | Month field 1.43% null **[Q5]**; clear peaks: birds May, reptiles June, amphibians July **[Q9]** | January holds 3.7% of bird records, consistent with real winter birding; confirm January shares for amphibians and reptiles are near zero |
