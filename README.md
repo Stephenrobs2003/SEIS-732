@@ -10,9 +10,9 @@ An individual data-product project (P0–P4) built in BigQuery on the GBIF speci
 
 | File | What it holds |
 |---|---|
-| [docs/p0-feasibility.md](docs/p0-feasibility.md) | Audience, questions, source, fit, risks, first P1 decision |
-| [sql/00_feasibility.sql](sql/00_feasibility.sql) | Reproducible schema and aggregate profiling queries |
-| [evidence/p0-feasibility-results.md](evidence/p0-feasibility-results.md) | Summarized results (counts, ranges, rates) — no source rows |
+| [p0-feasibility.md](p0-feasibility.md) | Audience, questions, source, fit, risks, first P1 decision |
+| [00_feasibility.sql](00_feasibility.sql) | Reproducible schema and aggregate profiling queries |
+| [p0-feasibility-results.md](p0-feasibility-results.md) | Summarized results (counts, ranges, rates) — no source rows |
 
 ## Source
 
