@@ -202,10 +202,11 @@ The primary question compares cells across periods for one class, so the class m
 | 1 (grain / relationships) | Fact rows fail to join a dimension (null species, class or month; a coordinate outside the cell spine) and silently drop out of counts | Count fact rows with no match in each dimension; reconcile `SUM(record_count)` in the serving table (all classes, all periods) with the curated fact row count, and the fact count with raw rows minus the documented >10 km exclusion | 0 unmatched rows per dimension; serving total = fact rows = raw rows − excluded rows | After `cur.fct_occurrence` and after `srv.cell_class_period_density` |
 | 2 (meaning of the audience result) | Edge cells that are only partly inside Minnesota have fewer records because they cover less of the state, so they would be falsely flagged as "possible gaps" | Compute `share_in_mn` for every cell; count cells flagged `possible_gap` that are edge cells; compare gap flags with and without an area adjustment | 125 edge cells identified (check 6); after area adjustment, the share of gap cells that are edge cells should fall below the unadjusted 26.7% (check 7) | In `cur.dim_grid_cell` and `srv.cell_class_period_density` |
 | 3 (source constraint) | 94% of records have no coordinate-uncertainty value, so imprecise points may land in the wrong cell | Report the share of fact rows with null, ≤10 km and >10 km uncertainty; keep 0.25° cells (~28 km) | Null share ≈ 94%, >10 km ≈ 0.55% (matches P0) | `cur.fct_occurrence` |
+| 4 (double counting, found in diagnosis) | The same sighting may be published by more than one dataset (for example, entered in both eBird and iNaturalist), so one observation becomes two fact rows and a cell looks better recorded than it is | Count `specieskey` × `cell_key` × year-month groups that contain records from more than one `datasetkey`, and the share of records in those groups. This is an upper bound: the extract has no day or observer, so overlapping groups are possible duplicates, not proven ones | The share is reported; if it is material, P2 adds a sensitivity view that counts each species × cell × month once, and the gap flag is compared under both | `cur.fct_occurrence`, P2 |
 
 ### Access
 
-The traced field (point coordinates) is **public but sensitive for some species**: GBIF publishers may generalize or withhold locations of at-risk species, and precise points could help locate them. Decision: **exclude** precise coordinates from the Serving layer and audience output. Coordinates stay only in Raw and Curated, which are accessed by the project owner and steward (me, Stephen). The intended users, survey coordinators, see only the Serving layer and dashboard, which show 0.25° cell counts. They should not reappear in the audience output; a cell-level count does not reveal a point location.
+The traced field (point coordinates) is **public but sensitive for some species**: GBIF publishers may generalize or withhold locations of at-risk species, and precise points could help locate them. Decision: **exclude** precise coordinates from the Serving layer and audience output. Coordinates stay only in Raw and Curated, which are accessed by the project owner and steward (me, Stephen). The intended users, survey coordinators, see only the Serving layer and dashboard, which show 0.25° cell counts. The program, through its survey coordinator, decides how a flagged cell is used; the flag supports that decision but does not make it. They should not reappear in the audience output; a cell-level count does not reveal a point location.
 
 ### Limitation and next step
 
@@ -215,13 +216,25 @@ The traced field (point coordinates) is **public but sensitive for some species*
 
 ## 4. Diagnose and revise the plan
 
+### Independent diagnosis (M07)
+
+M07 was an independent revision. I used the five questions from the diagnosis guide that most affect this project.
+
+| Diagnosis question | My answer from the plan | What it changed |
+|---|---|---|
+| Show one row in your source data. What does it represent? How did you check? | One GBIF occurrence record, keyed by `gbifid` (check 1: 0 null, 0 repeated). Checking the row count against P0 is what exposed that the working table is an ~8.4% sample (check 5). | The first P2 step became a full rebuild; all sampled counts are labeled as such. |
+| When you combine data, could a row be counted more than once or left out? How would you check? | *Left out:* rows with no species, class, year or month would drop out of joins; the model maps them to unknown and class-only members, and Risk 1 reconciles totals. *Counted twice:* not addressed before this review; the same sighting can be published by two datasets. | **Added Risk 4** and its check. The plan previously treated each record as a separate observation without testing that. |
+| If a value changes later, which value should an older report show? | Today's class (Type 1). Check 8 shows one reclassification moves 11 cells into "possible gap" since 2015, and GBIF has already re-keyed its species once (mid-2026). | Confirmed Type 1 with measured evidence; added check 9 for the key scheme in P2. |
+| What could make the answer misleading? What check would help? | Edge cells and a fixed count threshold: the "fewer than 5" rule flagged 92% of cells, 26.7% of them edge cells (checks 6–7). Also eBird dominance (88% of records). | Gap rule changed to area-adjusted density with a relative threshold. |
+| Who should decide what the result means and how people may use it? | I define and maintain the data and the gap rule. The nongame program, through its survey coordinator, decides whether a flagged cell warrants fieldwork. A flag is a prompt for that judgment, not a decision. | Stated in the access section and the claim limit. |
+
 ### Change memo
 
 | Item | Response |
 |---|---|
-| Feedback that changed the plan | No peer-diagnosis feedback was received on this draft. The plan was revised from two other sources. (1) **Instructor feedback on P0:** keep claims to recording density and possible survey gaps; this is the claim limit in Task 1, and the trend and lapsed-area questions were dropped. (2) **My own checks:** check 5 found the working table is a ~8.4% sample, so the first P2 step is now a full rebuild; checks 6–7 showed the fixed "fewer than 5 records" rule flagged 92% of cells and that 26.7% of flagged cells were edge cells, so the gap rule became area-adjusted density with a relative threshold; check 8 measured the Type 1 vs Type 2 difference (11 cells since 2015). |
-| Feedback not adopted, and why | None: no external feedback was declined. One option I considered and did not adopt was keeping the fixed record-count threshold, because on my data it could not rank cells for a coordinator. |
-| Main remaining uncertainty | Where the relative gap threshold lands on the full extract: the checks so far ran on an ~8.4% sample, so the cell counts behind the gap rule must be recomputed after the full rebuild, which also depends on the free scan allowance having room. |
+| Feedback that changed the plan | (1) **Instructor feedback on P0:** keep claims to recording density and possible survey gaps; this is the claim limit in Task 1, and the trend and lapsed-area questions were dropped. (2) **Independent diagnosis:** the double-counting question exposed an untested assumption that each record is a separate sighting, so Risk 4 and its check were added. (3) **My own checks:** the sample (check 5) moved the first P2 step to a full rebuild; checks 6–7 replaced the fixed "fewer than 5 records" rule with area-adjusted density and a relative threshold; check 8 measured the Type 1 vs Type 2 difference. |
+| Feedback not adopted, and why | I considered keeping the fixed record-count threshold because it is simpler to explain, and did not adopt it: on my data it flagged 92% of cells and could not rank them for a coordinator. I also did not add trend or lapsed-area questions back in, because eBird dominance makes year-over-year change mostly a measure of observer effort. |
+| Main remaining uncertainty | Where the relative gap threshold lands on the full extract, and how much cross-dataset double counting there is (Risk 4). Both need the full rebuild, which depends on the free scan allowance having room. |
 
 ### AI and tool use
 
