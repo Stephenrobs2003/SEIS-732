@@ -1,7 +1,8 @@
 -- =====================================================================
 -- P2 Step C: Raw -> Curated  (Minnesota Wildlife Survey Gap Finder)
 -- Project: fiery-monitor-508317-a8   Processing location: US
--- Input:  raw.gbif_mn_occurrences (built by sql/02_ingest.sql), raw.mn_boundary
+-- Input:  raw.gbif_mn_occurrences (built by sql/02_ingest.sql), read through the
+--         switch view cur.src_occurrences (C00), and raw.mn_boundary
 -- Output: four small dimension TABLES and one fact VIEW in dataset `cur`.
 --
 -- Storage: the sandbox has a 10 GiB storage limit, so the fact is a VIEW
@@ -26,6 +27,14 @@ FROM `fiery-monitor-508317-a8.raw.gbif_mn_occurrences`
 WHERE specieskey IS NOT NULL
 GROUP BY all_digits, key_length
 ORDER BY all_digits, key_length;
+
+
+-- C00. Input switch (added in P3). Every Curated step that reads occurrences
+--      reads this view, so the whole downstream pipeline can be pointed at a
+--      test copy of the input (P3 Part 3) and back by changing ONE statement.
+--      Normal setting: the Raw table. No storage (it is a view).
+CREATE OR REPLACE VIEW `fiery-monitor-508317-a8.cur.src_occurrences` AS
+SELECT * FROM `fiery-monitor-508317-a8.raw.gbif_mn_occurrences`;
 
 
 -- C1. dim_grid_cell: every 0.25-degree cell with a positive area inside Minnesota.
@@ -80,7 +89,7 @@ WITH t AS (
     CAST(specieskey AS STRING) AS specieskey,
     class,
     kingdom
-  FROM `fiery-monitor-508317-a8.raw.gbif_mn_occurrences`
+  FROM `fiery-monitor-508317-a8.cur.src_occurrences`
 )
 SELECT
   taxon_key,
@@ -106,7 +115,7 @@ SELECT DISTINCT
     WHEN year < 2015  THEN 'before 2015'
     ELSE '2015 onward'
   END                                                        AS period
-FROM `fiery-monitor-508317-a8.raw.gbif_mn_occurrences`;
+FROM `fiery-monitor-508317-a8.cur.src_occurrences`;
 
 
 -- C4. dim_dataset: one row per publishing dataset (names and licenses for
@@ -115,7 +124,7 @@ CREATE OR REPLACE TABLE `fiery-monitor-508317-a8.cur.dim_dataset` AS
 SELECT
   datasetkey AS dataset_key,
   COUNT(*)   AS raw_records
-FROM `fiery-monitor-508317-a8.raw.gbif_mn_occurrences`
+FROM `fiery-monitor-508317-a8.cur.src_occurrences`
 GROUP BY datasetkey;
 
 
@@ -135,7 +144,7 @@ SELECT
   basisofrecord                                                            AS basis_of_record,
   coordinateuncertaintyinmeters                                            AS coord_uncertainty_m,
   1                                                                        AS record_count
-FROM `fiery-monitor-508317-a8.raw.gbif_mn_occurrences`
+FROM `fiery-monitor-508317-a8.cur.src_occurrences`
 WHERE coordinateuncertaintyinmeters IS NULL
    OR coordinateuncertaintyinmeters <= 10000;
 
